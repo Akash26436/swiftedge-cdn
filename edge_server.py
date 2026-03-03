@@ -1,3 +1,5 @@
+import time
+TTL = 60
 import socket
 import requests
 import os
@@ -12,7 +14,7 @@ if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 
 def get_cache_filename(url):
-    return os.path.join(CACHE_DIR, hashlib.md5(url.encode()).hexdigest())
+    return os.path.join(CACHE_DIR, hashlib.md5(url.encode()).hexdigest() + ".cache")
 
 def fetch_from_origin(url):
     try:
@@ -30,22 +32,34 @@ def handle_client(conn, addr):
 
         cache_file = get_cache_filename(url)
 
+        # ✅ Properly indented inside try
         if os.path.exists(cache_file):
-            print("CACHE HIT")
-            with open(cache_file, "r", encoding="utf-8") as f:
-                data = f.read()
-        else:
-            print("CACHE MISS - Fetching from origin server")
-            data = fetch_from_origin(url)
-            with open(cache_file, "w", encoding="utf-8") as f:
-                f.write(data)
+            file_mtime = os.path.getmtime(cache_file)
 
-        conn.sendall(data.encode())
+            if time.time() - file_mtime < TTL:
+                print("CACHE HIT")
+                with open(cache_file, "r") as f:
+                    data = f.read()
+                    conn.send(data.encode())
+                    return
+            else:
+                print("CACHE EXPIRED")
+
+        # If no cache or expired → fetch from origin
+        print("Fetching from origin server...")
+        data = fetch_from_origin(url)
+
+        # Save to cache
+        with open(cache_file, "w") as f:
+            f.write(data)
+
+        conn.send(data.encode())
 
     except Exception as e:
         print("Error:", e)
 
-    conn.close()
+    finally:
+        conn.close()
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

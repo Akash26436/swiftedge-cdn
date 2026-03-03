@@ -1,3 +1,11 @@
+import time
+
+RATE_LIMIT = 5
+WINDOW = 10
+BLOCK_TIME = 20
+
+request_log = {}
+blocked_ips = {}
 import socket
 
 HOST = "0.0.0.0"
@@ -16,7 +24,41 @@ def get_next_server():
     current = (current + 1) % len(EDGE_SERVERS)
     return server
 
-def handle_client(client_conn):
+def handle_client(client_conn, addr):
+    client_ip = addr[0]
+    current_time = time.time()
+
+    # Check if IP is blocked
+    if client_ip in blocked_ips:
+        if current_time < blocked_ips[client_ip]:
+            print(f"Blocked IP {client_ip}")
+            client_conn.sendall(b"Too many requests. Try later.")
+            client_conn.close()
+            return
+        else:
+            del blocked_ips[client_ip]
+
+    # Initialize request log
+    if client_ip not in request_log:
+        request_log[client_ip] = []
+
+    # Remove old timestamps
+    request_log[client_ip] = [
+        t for t in request_log[client_ip]
+        if current_time - t < WINDOW
+    ]
+
+    request_log[client_ip].append(current_time)
+
+    # Check rate limit
+    if len(request_log[client_ip]) > RATE_LIMIT:
+        blocked_ips[client_ip] = current_time + BLOCK_TIME
+        print(f"Rate limit exceeded for {client_ip}")
+        client_conn.sendall(b"Rate limit exceeded.")
+        client_conn.close()
+        return
+
+    # Continue normal routing
     url = client_conn.recv(4096)
 
     edge_host, edge_port = get_next_server()
@@ -42,7 +84,7 @@ def start_load_balancer():
 
     while True:
         client_conn, addr = server.accept()
-        handle_client(client_conn)
+        handle_client(client_conn, addr)
 
 if __name__ == "__main__":
     start_load_balancer()
